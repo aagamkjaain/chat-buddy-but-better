@@ -5,12 +5,18 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import os from "os";
+import type { LLMProvider } from "../config/llmProvider.js";
 
 export interface BotConfig {
   configVersion?: number;
   username: string;
   agentName: string;
-  openaiApiKey: string;
+  // LLM Configuration
+  llmProvider: LLMProvider;
+  llmApiKey: string;
+  llmModel?: string;
+  // Legacy OpenAI support (deprecated, kept for backward compatibility)
+  openaiApiKey?: string;
   enableGoogleCalendar: boolean;
   googleOAuthClientId?: string;
   googleOAuthClientSecret?: string;
@@ -86,10 +92,14 @@ export const saveConfig = (config: BotConfig): void => {
   ensureStorageDir();
 
   const encryptedConfig = {
-    configVersion: 2,
+    configVersion: 3,
     username: config.username,
     agentName: config.agentName,
-    openaiApiKey: encrypt(config.openaiApiKey),
+    llmProvider: config.llmProvider,
+    llmApiKey: encrypt(config.llmApiKey),
+    llmModel: config.llmModel,
+    // Legacy support
+    openaiApiKey: config.openaiApiKey ? encrypt(config.openaiApiKey) : undefined,
     enableGoogleCalendar: config.enableGoogleCalendar,
     googleOAuthClientId: config.googleOAuthClientId
       ? encrypt(config.googleOAuthClientId)
@@ -163,11 +173,24 @@ export const loadConfig = (): BotConfig | null => {
       }
     }
 
+    // Handle backward compatibility: if old openaiApiKey exists, migrate to new llmProvider
+    let llmProvider = raw.llmProvider || "openai";
+    let llmApiKey = raw.llmApiKey ? decrypt(raw.llmApiKey) : "";
+    let llmModel = raw.llmModel;
+
+    if (!llmApiKey && raw.openaiApiKey) {
+      llmApiKey = decrypt(raw.openaiApiKey);
+      llmProvider = "openai";
+    }
+
     return {
       configVersion: configVersion,
       username: raw.username,
       agentName: raw.agentName,
-      openaiApiKey: decrypt(raw.openaiApiKey),
+      llmProvider: llmProvider as any,
+      llmApiKey,
+      llmModel,
+      openaiApiKey: raw.openaiApiKey ? decrypt(raw.openaiApiKey) : undefined,
       enableGoogleCalendar,
       googleOAuthClientId: clientId,
       googleOAuthClientSecret: clientSecret,

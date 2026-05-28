@@ -6,6 +6,7 @@ import { stdin as input, stdout as output } from "process";
 import ora from "ora";
 import pc from "picocolors";
 import { saveConfig, configExists, type BotConfig } from "../storage/configStore.js";
+import { getProviderInfo, validateApiKey, type LLMProvider } from "../config/llmProvider.js";
 
 const banner = ` ██████╗██╗  ██╗ █████╗ ████████╗   ██████╗ ██╗   ██╗██████╗ ██████╗ ██╗   ██╗
 ██╔════╝██║  ██║██╔══██╗╚══██╔══╝   ██╔══██╗██║   ██║██╔══██╗██╔══██╗╚██╗ ██╔╝
@@ -65,16 +66,52 @@ export const runInit = async (): Promise<void> => {
     }
     console.log();
 
-    console.log(pc.bold(pc.white("  🔑 Step 3: API Keys & Integrations")));
-    console.log(pc.dim("     Your keys are encrypted using AES-256 and stored locally."));
-    console.log(pc.dim("     They are never sent anywhere except to the respective API services."));
+    console.log(pc.bold(pc.white("  🔑 Step 3: LLM Provider Selection")));
+    console.log(pc.dim("     Choose your AI model provider:"));
+    console.log(pc.dim("     1) OpenAI (gpt-3.5-turbo) - Fast & Reliable"));
+    console.log(pc.dim("     2) Grok (Grok-2 by xAI) - Fast & Edgy"));
+    console.log(pc.dim("     3) Gemini (Google Gemini) - Advanced & Multimodal"));
     console.log();
 
-    const openaiApiKey = await ask(rl, "Enter your OpenAI API key (sk-...)");
-    if (!openaiApiKey || !openaiApiKey.startsWith("sk-")) {
-      console.log(pc.red("  ✗ Invalid OpenAI API key. Must start with 'sk-'."));
-      rl.close();
-      return;
+    let llmProvider: LLMProvider = "openai";
+    const providerChoice = await ask(rl, "Select LLM provider (1/2/3)");
+
+    switch (providerChoice) {
+      case "1":
+        llmProvider = "openai";
+        break;
+      case "2":
+        llmProvider = "grok";
+        break;
+      case "3":
+        llmProvider = "gemini";
+        break;
+      default:
+        console.log(pc.yellow("  ⚠ Invalid choice. Defaulting to OpenAI."));
+        llmProvider = "openai";
+    }
+
+    const providerInfo = getProviderInfo(llmProvider);
+    console.log(pc.blue(`  Selected: ${providerInfo.name} - ${providerInfo.description}`));
+    console.log();
+
+    console.log(pc.bold(pc.white("  🔐 Step 4: API Key Setup")));
+    console.log(pc.dim("     Your keys are encrypted using AES-256 and stored locally."));
+    console.log(pc.dim("     They are never sent anywhere except to the respective API services."));
+    console.log(pc.dim(`     Format: ${providerInfo.keyFormat}`));
+    console.log();
+
+    let llmApiKey = "";
+    let valid = false;
+
+    while (!valid) {
+      llmApiKey = await ask(rl, `Enter your ${providerInfo.name} API key`);
+      const validation = validateApiKey(llmProvider, llmApiKey);
+      if (validation.valid) {
+        valid = true;
+      } else {
+        console.log(pc.red(`  ✗ ${validation.error}`));
+      }
     }
     console.log();
 
@@ -103,10 +140,12 @@ export const runInit = async (): Promise<void> => {
     await new Promise((r) => setTimeout(r, 800));
 
     const config: BotConfig = {
-      configVersion: 2,
+      configVersion: 3,
       username,
       agentName,
-      openaiApiKey,
+      llmProvider,
+      llmApiKey,
+      llmModel: undefined,
       enableGoogleCalendar,
       googleOAuthClientId,
       googleOAuthClientSecret,

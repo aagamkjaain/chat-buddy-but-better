@@ -19,6 +19,10 @@ export const getHistory = (contactName: string): string[] => {
   return getUserHistoryForContext(contactName, 15);
 };
 
+export const getSelfNotes = (): string[] => {
+  return getUserHistoryForContext("Self (Saved Messages)", 50);
+};
+
 export const clearHistory = (contactName: string): void => {
   clearPersistentHistory(contactName);
 };

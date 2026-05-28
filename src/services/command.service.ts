@@ -1,7 +1,7 @@
 /**
  * Command Service
  */
-import { clearHistory, getHistory } from "./memory.service.js";
+import { clearHistory, getHistory, getSelfNotes } from "./memory.service.js";
 
 type MessageType = import("whatsapp-web.js").Message;
 
@@ -11,6 +11,7 @@ export const handleCommand = async (message: MessageType, text: string): Promise
         - Enter /time for current time
         - Enter /schedule for setting an reminder
         - Enter /history for seeing the chat history
+        - Enter /notes for viewing your saved messages (self-chat)
         - Enter /reset for reset it to null
         `);
   }
@@ -42,6 +43,15 @@ export const handleCommand = async (message: MessageType, text: string): Promise
       await message.reply("No chat history found.");
     } else {
       await message.reply(history.join("\n"));
+    }
+  }
+
+  if (text == "/notes") {
+    const notes = getSelfNotes();
+    if (notes.length === 0) {
+      await message.reply("📝 No saved messages found. Send notes to yourself to get started!");
+    } else {
+      await message.reply(`📝 Your Saved Messages:\n\n${notes.join("\n")}`);
     }
   }
 };
