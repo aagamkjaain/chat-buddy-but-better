@@ -1,13 +1,11 @@
 /**
  * Message Handler Service
- * Processes incoming WhatsApp messages, handles debouncing for rapid consecutive texts,
- * filters unwanted messages, and orchestrates agent responses and commands.
+ * Processes incoming WhatsApp messages and self-messages only.
+ * Only messages sent to yourself ("Message Yourself" chat) are processed.
+ * All other messages from contacts/groups are completely ignored.
  */
 import { runAgent } from "../agents/agent.servce.js";
-import { botRebootTime } from "../bot.js";
-import { createProtocols } from "../config/agent.protocol.js";
 import { storeMessage } from "./memory.service.js";
-import { handleCommand } from "./command.service.js";
 
 type MessageType = import("whatsapp-web.js").Message;
 
@@ -156,12 +154,14 @@ export const handleMessages = async (
   // Check both fromMe property and if it's a self-chat (message from yourself)
   const isSelfMessage = message.fromMe || (await isSelfChat(message));
   
-  console.log(`[MSG-HANDLER] isSelfMessage: ${isSelfMessage}, fromMe: ${message.fromMe}, body: ${message.body?.substring(0, 30) || "(empty)"}`);
+  console.log(`[MSG-HANDLER] Checking message: self=${isSelfMessage}, body="${message.body?.substring(0, 30) || "(empty)"}"`);
 
-  // SAVED MESSAGES ONLY MODE: Set to true to process only self-messages
-  const SAVED_MESSAGES_ONLY = process.env.CHAT_BUDDY_SAVED_MESSAGES_ONLY === "true";
+  // ⭐ SELF-MESSAGES ONLY MODE (DEFAULT)
+  // Bot only processes messages you send to yourself in "Message Yourself" chat
+  // All other messages from contacts/groups are completely ignored
   
   if (isSelfMessage) {
+    // ✅ This IS a self-message - process it
     if (!message.body) {
       console.log(`[SELF] Skipping - no body`);
       return;
@@ -170,103 +170,45 @@ export const handleMessages = async (
     const text = message.body.trim();
     const selfContactName = "Self (Saved Messages)";
     
+    // Store the message in chat history
     storeMessage(selfContactName, text, false);
-    console.log(`📝 [Self Note]: ${text}`);
+    console.log(`✅ [SELF-MESSAGE] Processing: "${text.substring(0, 50)}..."`);
     
-    // If in Saved Messages Only mode, process this message with the agent
-    if (SAVED_MESSAGES_ONLY) {
-      console.log(`[SELF-AGENT] Processing self-message in Saved Messages mode`);
-      const userId = message.from;
-      
-      // Add to pending replies for processing
-      if (!pendingReplies.has(userId)) {
-        pendingReplies.set(userId, {
-          messages: [],
-          latestMessage: message,
-          contactName: selfContactName,
-          username,
-          agentName,
-          timer: null,
-          processing: false,
-        });
-      }
-      
-      const pending = pendingReplies.get(userId)!;
-      pending.messages.push(text);
-      pending.latestMessage = message;
-      scheduleBufferedReply(userId);
-      return;
+    // Process with agent and get response
+    const userId = message.from;
+    
+    // Add to pending replies for processing
+    if (!pendingReplies.has(userId)) {
+      pendingReplies.set(userId, {
+        messages: [],
+        latestMessage: message,
+        contactName: selfContactName,
+        username,
+        agentName,
+        timer: null,
+        processing: false,
+      });
     }
     
-    return; // Don't process/respond to self-messages in normal mode
-  }
-
-  // Allow messages from the last hour (not just after bot start)
-  // This prevents filtering out recent messages from chat history
-  const oneHourAgo = Date.now() - 3600000; // 1 hour in milliseconds
-  if (message.timestamp * 1000 < oneHourAgo) {
-    console.log(`[MSG-HANDLER] Skipping - message too old (older than 1 hour)`);
+    const pending = pendingReplies.get(userId)!;
+    pending.messages.push(text);
+    pending.latestMessage = message;
+    scheduleBufferedReply(userId);
     return;
   }
-
-  if (!message.body) {
-    console.log(`[MSG-HANDLER] Skipping - no body`);
-    return;
-  }
-
-  const userId = message.from;
-  const text = message.body.trim();
-  const textLower = text.toLowerCase();
-
-  const protocols = createProtocols(agentName, username);
-
-  if (
-    (message.from.endsWith("@g.us") && !protocols.allowGroupReplies) ||
-    message.from === "status@broadcast"
-  ) {
-    console.log(`[MSG-HANDLER] Skipping - group or status broadcast`);
-    return;
-  }
-
-  const contact = await message.getContact();
-  const contactName = contact.pushname || contact.number;
-  console.log(`${contactName}: ${text}`);
   
-  // Debug: Log message metadata for self-message detection
-  console.log(`[DEBUG] Message from: ${message.from}, fromMe: ${message.fromMe}`);
-  const messageObj = message as any;
-  if (messageObj._data) {
-    console.log(`[DEBUG] Message _data properties:`, {
-      isFromMe: messageObj._data.isFromMe,
-      from: messageObj._data.from,
-    });
-  }
-
-  storeMessage(contactName, text, false);
-
-  if (textLower.startsWith("/")) {
-    await handleCommand(message, textLower);
-    return;
-  }
-
-  const existing = pendingReplies.get(userId);
-  if (!existing) {
-    pendingReplies.set(userId, {
-      messages: [text],
-      latestMessage: message,
-      contactName,
-      username,
-      agentName,
-      timer: null,
-      processing: false,
-    });
+  // ❌ NOT a self-message - ignore it completely
+  const contactId = message.from;
+  const isGroup = contactId.includes("@g.us");
+  const isBroadcast = contactId === "status@broadcast";
+  
+  if (isGroup) {
+    console.log(`❌ [IGNORED] Group message from ${contactId}`);
+  } else if (isBroadcast) {
+    console.log(`❌ [IGNORED] Status broadcast`);
   } else {
-    existing.messages.push(text);
-    existing.latestMessage = message;
-    existing.contactName = contactName;
-    existing.username = username;
-    existing.agentName = agentName;
+    console.log(`❌ [IGNORED] Message from contact ${contactId} - only self-messages are processed`);
   }
-
-  scheduleBufferedReply(userId);
+  
+  return;
 };
